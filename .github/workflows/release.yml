@@ -155,7 +155,7 @@ jobs:
           [ ${#files[@]} -gt 0 ] || { echo "no archives"; ls -laR; exit 1; }
           sha256sum "${files[@]}" | tee checksums.txt
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.ver.outputs.version }}
           name: timetravel ${{ steps.ver.outputs.version }}
