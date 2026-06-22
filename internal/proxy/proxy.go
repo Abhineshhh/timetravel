@@ -1,4 +1,4 @@
-﻿// Package proxy provides the reverse-proxy handler used in record mode.
+// Package proxy provides the reverse-proxy handler used in record mode.
 package proxy
 
 import (

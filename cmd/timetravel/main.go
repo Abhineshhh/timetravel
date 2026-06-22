@@ -1,4 +1,4 @@
-﻿// Command timetravel is the CLI for Local Network Time-Travel.
+// Command timetravel is the CLI for Local Network Time-Travel.
 //
 //	timetravel record  --upstream URL --port 8080 --out session.travel
 //	timetravel replay  --file session.travel --port 8080 --speed 0.5
@@ -24,7 +24,8 @@ import (
 	"github.com/lntt/timetravel/internal/replayer"
 )
 
-const version = "0.1.0"
+// version is set at link time via: -ldflags "-X main.version=v1.2.3"
+var version = "0.1.0"
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)

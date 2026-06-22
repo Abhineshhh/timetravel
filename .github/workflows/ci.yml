@@ -1,0 +1,279 @@
+# Continuous Integration
+# Lint/test/build are blocking. govulncheck is advisory (stdlib vulns lag Go releases).
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Latest stable patch line on runners; matches what we build/release with.
+  GO_VERSION: "1.25.x"
+  # Prevent go install of tools from auto-downloading a different toolchain mid-job.
+  GOTOOLCHAIN: local
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Lint — only checks we fully control (no stdlib vuln DB noise)
+  # -------------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: go version
+        run: go version
+
+      - name: gofmt
+        run: |
+          set -euo pipefail
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::Files not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+          echo "gofmt: OK"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: staticcheck
+        run: |
+          set -euo pipefail
+          # Runner is Go 1.25.x; latest staticcheck matches that line.
+          # Temporarily allow toolchain download only for the tool install if needed.
+          GOTOOLCHAIN=auto go install honnef.co/go/tools/cmd/staticcheck@latest
+          "$(go env GOPATH)/bin/staticcheck" -version || true
+          "$(go env GOPATH)/bin/staticcheck" ./...
+
+  # -------------------------------------------------------------------------
+  # Security scan — advisory only (stdlib findings change faster than releases)
+  # Does NOT block CI Success; still surfaces results in the Actions UI.
+  # -------------------------------------------------------------------------
+  security:
+    name: Security (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: govulncheck
+        run: |
+          set -euo pipefail
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          echo "Running govulncheck (advisory — failures do not block merge)..."
+          if ! govulncheck ./...; then
+            echo "::warning::govulncheck reported issues (often Go stdlib; upgrade runner Go or wait for patch releases)"
+            exit 1
+          fi
+          echo "govulncheck: clean"
+
+  # -------------------------------------------------------------------------
+  # Tests — multi OS / Go versions we claim to support
+  # -------------------------------------------------------------------------
+  test:
+    name: Test (Go ${{ matrix.go }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        go: ["1.24.x", "1.25.x"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Verify go.mod tidy
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy
+          if ! git diff --exit-code go.mod; then
+            echo "::error::go.mod is not tidy; run: go mod tidy"
+            exit 1
+          fi
+          if [ -f go.sum ] && ! git diff --exit-code go.sum; then
+            echo "::error::go.sum is not tidy; run: go mod tidy"
+            exit 1
+          fi
+
+      - name: Run tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            go test -count=1 -timeout 5m ./...
+          else
+            go test -race -count=1 -timeout 5m ./...
+          fi
+
+      - name: Coverage (Linux + latest Go only)
+        if: runner.os == 'Linux' && matrix.go == '1.25.x'
+        run: |
+          go test -coverprofile=coverage.out -covermode=atomic ./...
+          go tool cover -func=coverage.out | tail -1
+
+      - name: Upload coverage
+        if: runner.os == 'Linux' && matrix.go == '1.25.x'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.out
+          retention-days: 14
+
+  # -------------------------------------------------------------------------
+  # Build — native binaries + smoke
+  # -------------------------------------------------------------------------
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: [lint, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_SHA::8}"
+          EXT=""
+          if [ "${{ runner.os }}" = "Windows" ]; then EXT=".exe"; fi
+          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "timetravel${EXT}" ./cmd/timetravel
+
+      - name: Smoke version + help
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXT=""
+          if [ "${{ runner.os }}" = "Windows" ]; then EXT=".exe"; fi
+          "./timetravel${EXT}" version
+          "./timetravel${EXT}" help
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: timetravel-${{ runner.os }}-${{ github.sha }}
+          path: |
+            timetravel
+            timetravel.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  # -------------------------------------------------------------------------
+  # Cross-compile — same targets as release.yml
+  # -------------------------------------------------------------------------
+  cross-compile:
+    name: Cross-compile matrix
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Cross-compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_SHA::8}"
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          mkdir -p dist
+          for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS="${t%/*}"
+            GOARCH="${t#*/}"
+            EXT=""
+            [ "$GOOS" = "windows" ] && EXT=".exe"
+            OUT="dist/timetravel-${GOOS}-${GOARCH}${EXT}"
+            echo "Building ${OUT}"
+            GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 \
+              go build -trimpath -ldflags="$LDFLAGS" -o "$OUT" ./cmd/timetravel
+          done
+          ls -la dist/
+
+      - name: Upload cross artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: timetravel-cross-${{ github.sha }}
+          path: dist/
+          retention-days: 7
+
+  # -------------------------------------------------------------------------
+  # Single required status check for branch protection
+  # security is intentionally omitted (advisory only)
+  # -------------------------------------------------------------------------
+  ci-success:
+    name: CI Success
+    if: always()
+    needs: [lint, test, build, cross-compile]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required jobs
+        run: |
+          set -euo pipefail
+          echo "lint=${{ needs.lint.result }}"
+          echo "test=${{ needs.test.result }}"
+          echo "build=${{ needs.build.result }}"
+          echo "cross-compile=${{ needs.cross-compile.result }}"
+          for r in \
+            "${{ needs.lint.result }}" \
+            "${{ needs.test.result }}" \
+            "${{ needs.build.result }}" \
+            "${{ needs.cross-compile.result }}"; do
+            if [ "$r" != "success" ]; then
+              echo "::error::Required CI job did not succeed (got: $r)"
+              exit 1
+            fi
+          done
+          echo "All required CI jobs passed."

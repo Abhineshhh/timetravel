@@ -1,0 +1,177 @@
+# Release on semver tags (vX.Y.Z) or workflow_dispatch with tag input.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag (e.g. v0.1.0)"
+        required: true
+        type: string
+      draft:
+        description: "Publish as draft"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: "1.25.x"
+  GOTOOLCHAIN: local
+
+jobs:
+  precheck:
+    name: Pre-release checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - run: go vet ./...
+      - run: go test -race -count=1 -timeout 5m ./...
+
+  build-release:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: precheck
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::empty version"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and archive
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          EXT=""
+          [ "${{ matrix.goos }}" = "windows" ] && EXT=".exe"
+          OUT="timetravel-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
+          go build -trimpath -ldflags="${LDFLAGS}" -o "${OUT}" ./cmd/timetravel
+
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            ARCHIVE="timetravel_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip"
+            if command -v zip >/dev/null 2>&1; then
+              zip -9 "${ARCHIVE}" "${OUT}" README.md LICENSE
+            else
+              python3 -c "import zipfile,os; z=zipfile.ZipFile('${ARCHIVE}','w',zipfile.ZIP_DEFLATED); z.write('${OUT}'); z.write('README.md'); z.write('LICENSE') if os.path.exists('LICENSE') else None; z.close()"
+            fi
+          else
+            ARCHIVE="timetravel_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz"
+            tar -czf "${ARCHIVE}" "${OUT}" README.md LICENSE
+          fi
+          ls -la "${ARCHIVE}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: timetravel_*
+          if-no-files-found: error
+          retention-days: 5
+
+  publish:
+    name: Publish release
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: release-assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=( timetravel_*.tar.gz timetravel_*.zip )
+          [ ${#files[@]} -gt 0 ] || { echo "no archives"; ls -laR; exit 1; }
+          sha256sum "${files[@]}" | tee checksums.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.version }}
+          name: timetravel ${{ steps.ver.outputs.version }}
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          generate_release_notes: true
+          body: |
+            ## timetravel ${{ steps.ver.outputs.version }}
+
+            Record & replay HTTP at arbitrary speeds.
+
+            Verify: `sha256sum -c checksums.txt`
+
+            Built from `${{ github.sha }}`.
+          files: |
+            release-assets/timetravel_*.tar.gz
+            release-assets/timetravel_*.zip
+            release-assets/checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

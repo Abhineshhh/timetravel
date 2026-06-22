@@ -1,4 +1,4 @@
-﻿// Package rewriter adjusts time-related HTTP response headers during replay
+// Package rewriter adjusts time-related HTTP response headers during replay
 // so relative age/expiry relationships are preserved while absolute values
 // track the current wall clock.
 package rewriter

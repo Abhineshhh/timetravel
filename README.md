@@ -1,4 +1,4 @@
-﻿# timetravel — Local Network Time-Travel
+﻿# timetravel â€” Local Network Time-Travel
 
 A **local HTTP proxy** that records every request/response with microsecond timestamps, then **replays** them at any speed. Slow-mo to expose race conditions. Fast-forward to stress timeouts. Exact 1:1 replay to reproduce a bug that only happened once.
 
@@ -6,13 +6,62 @@ Think of it as a **DVR for network traffic**: record the episode once, scrub at 
 
 Zero third-party dependencies. One static-friendly Go binary.
 
+[![CI](https://github.com/Abhineshhh/timetravel/actions/workflows/ci.yml/badge.svg)](https://github.com/Abhineshhh/timetravel/actions/workflows/ci.yml)
+[![Release](https://github.com/Abhineshhh/timetravel/actions/workflows/release.yml/badge.svg)](https://github.com/Abhineshhh/timetravel/actions/workflows/release.yml)
+
 ## Build
 
 ```bash
 go build -o timetravel ./cmd/timetravel
 # or
 go install ./cmd/timetravel
+# or use the Makefile (CI-parity)
+make test && make build
 ```
+
+## CI/CD
+
+GitHub Actions pipelines live under [`.github/workflows/`](.github/workflows/).
+
+### CI (`ci.yml`) â€” every push & PR to `main`
+
+| Job | What it does |
+|-----|----------------|
+| **Lint** | `gofmt`, `go vet`, `staticcheck` (blocking) |`n| **Security** | `govulncheck` advisory only (stdlib vulns do not block CI) |
+| **Test** | Matrix: Ubuntu / Windows / macOS Ã— Go 1.24 & 1.25 (build/release on 1.25); race detector (non-Windows); coverage artifact on Linux |
+| **Build** | Native binary per OS + smoke (`version` / `help`) |
+| **Cross-compile** | linux/darwin/windows Ã— amd64/arm64 (guards the release matrix) |
+| **CI Success** | Single gate job for branch protection (`CI Success` required) |
+
+Also runs on **workflow_dispatch** (manual).
+
+### CD (`release.yml`) â€” version tags
+
+Trigger by pushing a semver tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Or run **Release** manually in Actions (`workflow_dispatch`) with input `tag=v0.1.0`.
+
+Pipeline:
+
+1. **Precheck** â€” `go vet` + `go test -race`
+2. **Build** â€” six targets (linux/darwin/windows Ã— amd64/arm64), `CGO_ENABLED=0`, version via `-ldflags "-X main.version=â€¦"`
+3. **Publish** â€” GitHub Release with `.tar.gz` / `.zip` archives + `checksums.txt` (SHA-256)
+
+### Dependabot
+
+[`.github/dependabot.yml`](.github/dependabot.yml) opens weekly PRs for Actions + Go modules.
+
+### Branch protection (recommended)
+
+In GitHub â†’ Settings â†’ Branches â†’ protect `main`:
+
+- Require status check: **CI Success**
+- Require branches to be up to date before merging
 
 ## Quick start
 
@@ -37,9 +86,9 @@ Serve the recording (half speed = slow motion):
 | `--speed` | Effect |
 |-----------|--------|
 | `1` | Real-time (original delays) |
-| `0.1` | 10× slower — attach a debugger, watch races |
-| `10` | 10× faster — compress long sessions / force timeouts |
-| `0` | Instant — no sleeps between responses |
+| `0.1` | 10Ã— slower â€” attach a debugger, watch races |
+| `10` | 10Ã— faster â€” compress long sessions / force timeouts |
+| `0` | Instant â€” no sleeps between responses |
 
 Replay a subsequence only:
 
@@ -76,19 +125,19 @@ Disable with `--control-port 0`.
 
 ## How it works
 
-1. **Proxy (record)** — `internal/proxy` reverse-proxies to `--upstream`, buffers request/response bodies, appends to the `.travel` writer.
-2. **Format** — `internal/format` encodes a sequential binary log (`TRVL` magic + epoch µs + entries). No database.
-3. **Speed engine** — `internal/replayer.Clock` sleeps `(t_entry − t_prev) / speed` before serving each response. Pause/step interrupt the wait.
-4. **Matcher** — `internal/matcher` picks the next unused entry by method+URL (sequential) or method+URL+SHA256(body).
-5. **Timestamp rewriter** — `internal/rewriter` shifts `Date`, `Last-Modified`, `Expires`, `Age`, etc. so relative gaps survive while absolute values track “now”.
+1. **Proxy (record)** â€” `internal/proxy` reverse-proxies to `--upstream`, buffers request/response bodies, appends to the `.travel` writer.
+2. **Format** â€” `internal/format` encodes a sequential binary log (`TRVL` magic + epoch Âµs + entries). No database.
+3. **Speed engine** â€” `internal/replayer.Clock` sleeps `(t_entry âˆ’ t_prev) / speed` before serving each response. Pause/step interrupt the wait.
+4. **Matcher** â€” `internal/matcher` picks the next unused entry by method+URL (sequential) or method+URL+SHA256(body).
+5. **Timestamp rewriter** â€” `internal/rewriter` shifts `Date`, `Last-Modified`, `Expires`, `Age`, etc. so relative gaps survive while absolute values track â€œnowâ€.
 
 ## `.travel` file format
 
 ```
 [4 bytes:  "TRVL"]
-[8 bytes:  recording start epoch µs, little-endian]
+[8 bytes:  recording start epoch Âµs, little-endian]
 [entries...]
-  [8 bytes: relative timestamp µs from recording start]
+  [8 bytes: relative timestamp Âµs from recording start]
   [2 bytes: method length] [N bytes: method]
   [4 bytes: URL length] [N bytes: URL]
   [4 bytes: request headers length] [N bytes: HTTP/1.1 header text]
@@ -108,19 +157,19 @@ internal/format/         .travel encode/decode
 internal/recorder/       append exchanges during record
 internal/proxy/          reverse proxy + capture
 internal/replayer/       serve + virtual clock
-internal/matcher/        request → entry matching
+internal/matcher/        request â†’ entry matching
 internal/rewriter/       time header shifting
 ```
 
 ## Typical workflows
 
-**Bug reproduction** — Record on staging while reproducing the flake, bring `bug.travel` to your desk, `replay --speed 0.1` with a debugger on the client.
+**Bug reproduction** â€” Record on staging while reproducing the flake, bring `bug.travel` to your desk, `replay --speed 0.1` with a debugger on the client.
 
-**Retry / timeout tests** — Record a real slow payment call once; `replay --speed 10` in CI so the timeout fires every run.
+**Retry / timeout tests** â€” Record a real slow payment call once; `replay --speed 10` in CI so the timeout fires every run.
 
-**Offline backend** — Record once; develop against `replay --speed 0` with no real server.
+**Offline backend** â€” Record once; develop against `replay --speed 0` with no real server.
 
-**Demo a race** — Record the bad sequence; replay in the meeting at `0.1` — no more “works on my machine”.
+**Demo a race** â€” Record the bad sequence; replay in the meeting at `0.1` â€” no more â€œworks on my machineâ€.
 
 ## Limitations (v0.1)
 
