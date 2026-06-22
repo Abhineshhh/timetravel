@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.22.x"
+  GO_VERSION: "1.24.x"
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -50,11 +50,13 @@ jobs:
         run: go vet ./...
 
       - name: Install staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@2024.1.1
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
 
       - name: staticcheck
         run: staticcheck ./...
 
+      # Fail on reachable vulns in *our* modules; requires current Go (1.24+)
+      # so the standard library itself is not reported as vulnerable.
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -70,7 +72,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        go: ["1.22.x", "1.23.x"]
+        go: ["1.24.x", "1.25.x"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -115,7 +117,7 @@ jobs:
           go tool cover -func=coverage.out | tail -1
 
       - name: Upload coverage artifact
-        if: runner.os == 'Linux' && matrix.go == '1.22.x'
+        if: runner.os == 'Linux' && matrix.go == '1.24.x'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report

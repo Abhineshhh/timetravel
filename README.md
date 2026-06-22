@@ -28,7 +28,7 @@ GitHub Actions pipelines live under [`.github/workflows/`](.github/workflows/).
 | Job | What it does |
 |-----|----------------|
 | **Lint** | `gofmt` check, `go vet`, `staticcheck`, `govulncheck` |
-| **Test** | Matrix: Ubuntu / Windows / macOS × Go 1.22 & 1.23; race detector (non-Windows); coverage artifact on Linux |
+| **Test** | Matrix: Ubuntu / Windows / macOS × Go 1.24 & 1.25; race detector (non-Windows); coverage artifact on Linux |
 | **Build** | Native binary per OS + smoke (`version` / `help`) |
 | **Cross-compile** | linux/darwin/windows × amd64/arm64 (guards the release matrix) |
 | **CI Success** | Single gate job for branch protection (`CI Success` required) |
