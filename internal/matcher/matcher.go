@@ -1,4 +1,4 @@
-﻿// Package matcher decides which recorded entry should satisfy an incoming request.
+// Package matcher decides which recorded entry should satisfy an incoming request.
 package matcher
 
 import (

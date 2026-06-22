@@ -1,4 +1,4 @@
-﻿// Package recorder writes live proxy traffic into a .travel file.
+// Package recorder writes live proxy traffic into a .travel file.
 package recorder
 
 import (

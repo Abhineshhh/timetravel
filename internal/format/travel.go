@@ -1,4 +1,4 @@
-﻿// Package format implements the .travel binary session format.
+// Package format implements the .travel binary session format.
 //
 // File layout:
 //

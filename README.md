@@ -1,4 +1,4 @@
-﻿# timetravel — Local Network Time-Travel
+# timetravel — Local Network Time-Travel
 
 A **local HTTP proxy** that records every request/response with microsecond timestamps, then **replays** them at any speed. Slow-mo to expose race conditions. Fast-forward to stress timeouts. Exact 1:1 replay to reproduce a bug that only happened once.
 
@@ -6,13 +6,62 @@ Think of it as a **DVR for network traffic**: record the episode once, scrub at 
 
 Zero third-party dependencies. One static-friendly Go binary.
 
+[![CI](https://github.com/Abhineshhh/timetravel/actions/workflows/ci.yml/badge.svg)](https://github.com/Abhineshhh/timetravel/actions/workflows/ci.yml)
+[![Release](https://github.com/Abhineshhh/timetravel/actions/workflows/release.yml/badge.svg)](https://github.com/Abhineshhh/timetravel/actions/workflows/release.yml)
+
 ## Build
 
 ```bash
 go build -o timetravel ./cmd/timetravel
 # or
 go install ./cmd/timetravel
+# or use the Makefile (CI-parity)
+make test && make build
 ```
+
+## CI/CD
+
+GitHub Actions pipelines live under [`.github/workflows/`](.github/workflows/).
+
+### CI (`ci.yml`) — every push & PR to `main`
+
+| Job | What it does |
+|-----|----------------|
+| **Lint** | `gofmt` check, `go vet`, `staticcheck`, `govulncheck` |
+| **Test** | Matrix: Ubuntu / Windows / macOS × Go 1.22 & 1.23; race detector (non-Windows); coverage artifact on Linux |
+| **Build** | Native binary per OS + smoke (`version` / `help`) |
+| **Cross-compile** | linux/darwin/windows × amd64/arm64 (guards the release matrix) |
+| **CI Success** | Single gate job for branch protection (`CI Success` required) |
+
+Also runs on **workflow_dispatch** (manual).
+
+### CD (`release.yml`) — version tags
+
+Trigger by pushing a semver tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Or run **Release** manually in Actions (`workflow_dispatch`) with input `tag=v0.1.0`.
+
+Pipeline:
+
+1. **Precheck** — `go vet` + `go test -race`
+2. **Build** — six targets (linux/darwin/windows × amd64/arm64), `CGO_ENABLED=0`, version via `-ldflags "-X main.version=…"`
+3. **Publish** — GitHub Release with `.tar.gz` / `.zip` archives + `checksums.txt` (SHA-256)
+
+### Dependabot
+
+[`.github/dependabot.yml`](.github/dependabot.yml) opens weekly PRs for Actions + Go modules.
+
+### Branch protection (recommended)
+
+In GitHub → Settings → Branches → protect `main`:
+
+- Require status check: **CI Success**
+- Require branches to be up to date before merging
 
 ## Quick start
 

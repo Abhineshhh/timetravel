@@ -1,4 +1,4 @@
-﻿// Package replayer serves recorded .travel sessions with a controllable virtual clock.
+// Package replayer serves recorded .travel sessions with a controllable virtual clock.
 package replayer
 
 import (
@@ -17,13 +17,13 @@ import (
 // Clock controls how fast recorded delays elapse during replay.
 // Speed 1.0 = real-time, 0.1 = 10× slower, 10 = 10× faster, 0 = no delay.
 type Clock struct {
-	mu        sync.Mutex
-	speed     float64
-	paused    bool
-	stepCh    chan struct{} // non-nil while paused; send to step one exchange
-	replayT0  time.Time     // wall time when replay started
-	lastRel   time.Duration // last served entry relative time (recorded)
-	cond      *sync.Cond
+	mu       sync.Mutex
+	speed    float64
+	paused   bool
+	stepCh   chan struct{} // non-nil while paused; send to step one exchange
+	replayT0 time.Time     // wall time when replay started
+	lastRel  time.Duration // last served entry relative time (recorded)
+	cond     *sync.Cond
 }
 
 // NewClock creates a clock at the given speed factor.

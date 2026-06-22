@@ -1,4 +1,4 @@
-﻿package format_test
+package format_test
 
 import (
 	"bytes"
