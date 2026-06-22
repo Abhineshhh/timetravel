@@ -1,4 +1,5 @@
-timetravel
-timetravel.exe
+# Built binaries (not source dirs)
+/timetravel
+/timetravel.exe
 *.travel
 _up.py
