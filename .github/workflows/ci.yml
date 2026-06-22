@@ -59,8 +59,10 @@ jobs:
       - name: staticcheck
         run: |
           set -euo pipefail
-          # Install with the job's Go (GOTOOLCHAIN=local prevents version hop).
-          go install honnef.co/go/tools/cmd/staticcheck@v0.6.1
+          # Runner is Go 1.25.x; latest staticcheck matches that line.
+          # Temporarily allow toolchain download only for the tool install if needed.
+          GOTOOLCHAIN=auto go install honnef.co/go/tools/cmd/staticcheck@latest
+          "$(go env GOPATH)/bin/staticcheck" -version || true
           "$(go env GOPATH)/bin/staticcheck" ./...
 
   # -------------------------------------------------------------------------
